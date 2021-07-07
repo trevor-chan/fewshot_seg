@@ -19,14 +19,17 @@ class ImageDataset(Dataset):
         
 
     def __getitem__(self, index):
-        img = Image.open(self.files[index % len(self.files)]+".jpg")
-        mask = Image.open(self.files[index % len(self.files)]+".png")
+        img = np.array(Image.open(self.files[index % len(self.files)]+".jpg"))
+        mask = np.array(Image.open(self.files[index % len(self.files)]+".png"))
         
         img = np.concatenate((img,noisy_blur(mask)[:,:,0:1]), axis = 2)
-        mask = np.concatenate((mask,mask), axis = 2)[:,:,0:4]
+        
+        combined = torch.from_numpy(np.concatenate((img,mask),axis=2))
+        
+        combined = self.transform(combined)
 
-        img_A = self.transform(img)
-        img_B = self.transform(mask)
+        img_A = combined[:,:,0:4]
+        img_B = combined[:,:,4:5]
 
         return {"A": img_A, "B": img_B}
 
