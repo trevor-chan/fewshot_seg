@@ -12,7 +12,7 @@ class ImageDataset(Dataset):
     def __init__(self, root, transforms_=None, mode="train"):
         self.transform = transforms.Compose(transforms_)
 
-        self.files = sorted(glob.glob('datasets/FSS-1000/fewshot_data/*/*.jpg')[0:-4])
+        self.files = sorted(glob.glob('~/datasets/FSS-1000/fewshot_data/*/*.jpg')[0:-4])
 #         if mode == "train":
 #             self.files.extend(sorted(glob.glob(os.path.join(root, "test") + "/*.*")))
         
