@@ -9,7 +9,7 @@ import torchvision.transforms as transforms
 
 
 class ImageDataset(Dataset):
-    def __init__(self, root, transforms_=None, mode="train"):
+    def __init__(self, transforms_=None, mode="train"):
         self.transform = transforms.Compose(transforms_)
 
         self.files = sorted(glob.glob('~/datasets/FSS-1000/fewshot_data/*/*.jpg')[0:-4])
