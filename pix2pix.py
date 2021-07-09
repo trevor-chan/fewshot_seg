@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
 parser.add_argument("--dataset_name", type=str, default="facades", help="name of the dataset")
-parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=8, help="size of the batches")
 parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
@@ -33,13 +33,13 @@ parser.add_argument("--decay_epoch", type=int, default=100, help="epoch from whi
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
 parser.add_argument("--img_height", type=int, default=256, help="size of image height")
 parser.add_argument("--img_width", type=int, default=256, help="size of image width")
-parser.add_argument("--channels", type=int, default=3, help="number of image channels")
+parser.add_argument("--channels", type=int, default=4, help="number of image channels")
 parser.add_argument(
     "--sample_interval", type=int, default=500, help="interval between sampling of images from generators"
 )
 parser.add_argument("--checkpoint_interval", type=int, default=-1, help="interval between model checkpoints")
 opt = parser.parse_args()
-print(opt)
+#print(opt)
 
 os.makedirs("images/%s" % opt.dataset_name, exist_ok=True)
 os.makedirs("saved_models/%s" % opt.dataset_name, exist_ok=True)
@@ -48,10 +48,10 @@ cuda = True if torch.cuda.is_available() else False
 
 # Loss functions
 criterion_GAN = torch.nn.MSELoss()
-criterion_pixelwise = torch.nn.L1Loss()
+criterion_pixelwise = torch.nn.L1Loss(reduction='mean')
 
 # Loss weight of L1 pixel-wise loss between translated image and real image
-lambda_pixel = 100
+lambda_pixel = 5
 
 # Calculate output of image discriminator (PatchGAN)
 patch = (1, opt.img_height // 2 ** 4, opt.img_width // 2 ** 4)
@@ -80,27 +80,29 @@ optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1,
 optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
 
 # Configure dataloaders
-transforms_ = [
-    transforms.Resize((opt.img_height, opt.img_width), Image.BICUBIC),
-    transforms.ToTensor(),
-    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(degrees=(-45, 45)),
-    transforms.RandomAutocontrast(),
-]
+# transforms_ = [
+#     transforms.Resize((opt.img_height, opt.img_width), Image.BICUBIC),
+#     transforms.ToTensor(),
+#     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+#     transforms.RandomHorizontalFlip(),
+#     transforms.RandomRotation(degrees=(-45, 45)),
+#     transforms.RandomAutocontrast(),
+# ]
 
 dataloader = DataLoader(
-    ImageDataset("../../data/%s" % opt.dataset_name, transforms_=transforms_),
+#     ImageDataset(transforms_=transforms_),
+    ImageDataset(),
     batch_size=opt.batch_size,
     shuffle=True,
-    num_workers=opt.n_cpu,
+    num_workers=8,
 )
 
 val_dataloader = DataLoader(
-    ImageDataset("../../data/%s" % opt.dataset_name, transforms_=transforms_, mode="val"),
-    batch_size=10,
+#     ImageDataset(transforms_=transforms_, mode="val"),
+    ImageDataset(mode="val"),
+    batch_size=opt.batch_size,
     shuffle=True,
-    num_workers=1,
+    num_workers=8,
 )
 
 # Tensor type
@@ -110,11 +112,22 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 def sample_images(batches_done):
     """Saves a generated sample from the validation set"""
     imgs = next(iter(val_dataloader))
-    real_A = Variable(imgs["B"].type(Tensor))
-    real_B = Variable(imgs["A"].type(Tensor))
-    fake_B = generator(real_A)
-    img_sample = torch.cat((real_A.data, fake_B.data, real_B.data), -2)
-    save_image(img_sample, "images/%s/%s.png" % (opt.dataset_name, batches_done), nrow=5, normalize=True)
+    gtmask = Variable(imgs["gtmask"].type(Tensor))
+    imgin = Variable(imgs["imgin"].type(Tensor))
+    genmask = generator(imgin)
+    
+    img_sample = torch.cat((imgin.data[:,0:3,:,:], 
+                            imgin.data[:,3:4,:,:].repeat(1,3,1,1)*255, 
+                            gtmask.data.repeat(1,3,1,1), 
+                            genmask.data.repeat(1,3,1,1)*255), 
+                           dim=2)
+
+#     img_sample = torch.cat((imgin.data[:,3:4,:,:]*255, 
+#                             gtmask.data, 
+#                             genmask.data*255, ),
+#                             dim=2)
+    
+    save_image(img_sample, "images/%s/%s.png" % (opt.dataset_name, batches_done), nrow=5, normalize=True, normalize_each=True)
 
 
 # ----------
@@ -127,12 +140,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
     for i, batch in enumerate(dataloader):
 
         # Model inputs
-        real_A = Variable(batch["B"].type(Tensor))
-        real_B = Variable(batch["A"].type(Tensor))
+        gtmask = Variable(batch["gtmask"].type(Tensor))
+        imgin = Variable(batch["imgin"].type(Tensor))
 
         # Adversarial ground truths
-        valid = Variable(Tensor(np.ones((real_A.size(0), *patch))), requires_grad=False)
-        fake = Variable(Tensor(np.zeros((real_A.size(0), *patch))), requires_grad=False)
+        valid = Variable(Tensor(np.ones((gtmask.size(0), *patch))), requires_grad=False)
+        fake = Variable(Tensor(np.zeros((gtmask.size(0), *patch))), requires_grad=False)
+        
+        
+#         print(valid.shape)
 
         # ------------------
         #  Train Generators
@@ -141,15 +157,18 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_G.zero_grad()
 
         # GAN loss
-        fake_B = generator(real_A)
-        pred_fake = discriminator(fake_B, real_A)
+        genmask = generator(imgin)
+        
+        pred_fake = discriminator(imgin, genmask)
+        
         loss_GAN = criterion_GAN(pred_fake, valid)
         # Pixel-wise loss
-        loss_pixel = criterion_pixelwise(fake_B, real_B)
+        loss_pixel = criterion_pixelwise(gtmask, genmask)
 
         # Total loss
         loss_G = loss_GAN + lambda_pixel * loss_pixel
-
+#         loss_G = lambda_pixel * loss_pixel
+        
         loss_G.backward()
 
         optimizer_G.step()
@@ -161,12 +180,16 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_D.zero_grad()
 
         # Real loss
-        pred_real = discriminator(real_B, real_A)
+        pred_real = discriminator(imgin, gtmask)
         loss_real = criterion_GAN(pred_real, valid)
 
         # Fake loss
-        pred_fake = discriminator(fake_B.detach(), real_A)
+        pred_fake = discriminator(imgin, genmask.detach())
         loss_fake = criterion_GAN(pred_fake, fake)
+        
+#         print(loss_real)
+#         print('------')
+#         print(loss_fake)
 
         # Total loss
         loss_D = 0.5 * (loss_real + loss_fake)
@@ -194,7 +217,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
                 len(dataloader),
                 loss_D.item(),
                 loss_G.item(),
-                loss_pixel.item(),
+                loss_pixel.item()*lambda_pixel,
                 loss_GAN.item(),
                 time_left,
             )
