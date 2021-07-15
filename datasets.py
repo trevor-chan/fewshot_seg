@@ -23,8 +23,15 @@ class ImageDataset(Dataset):
     def __getitem__(self, index):
         img = Image.open(self.files[index % len(self.files)]+".jpg")
         mask = Image.open(self.files[index % len(self.files)]+".png")
-        messymask = Image.fromarray(np.uint8(self.noisy_blur(np.array(mask))[:,:,0:3]))
+        messymask = Image.fromarray(np.uint8(self.random_noisy_blur(np.array(mask))[:,:,0:3]))
                 
+        # Random rotation
+        theta = np.random.normal(loc = 0.0, scale = 20, size = None)
+        
+        img = transforms.functional.rotate(img,theta)
+        mask = transforms.functional.rotate(mask,theta)
+        messymask = transforms.functional.rotate(messymask,theta)
+        
         # Resize
         resize = transforms.Resize(size=(300, 300))
         img = resize(img)
@@ -44,11 +51,6 @@ class ImageDataset(Dataset):
             mask = transforms.functional.hflip(mask)
             messymask = transforms.functional.hflip(messymask)
             
-#         # Random rotation
-#         rotate = transforms.RandomRotation(45)
-#         img = rotate(img)
-#         mask = rotate(mask)
-#         messymask = rotate(messymask)
             
         img = np.array(img)
         mask = np.array(mask)
@@ -81,6 +83,28 @@ class ImageDataset(Dataset):
             print("ERROR")
             return 1
         blur = filters.gaussian(label,10,multichannel=True)
+        
+        noisetensor = torch.normal(0,1,size=(1,1,noise_kernels,noise_kernels))        
+        noisetensor = torch.nn.functional.interpolate(noisetensor, size = blur.shape[:2], mode = 'bilinear', align_corners = False)
+        noisetensor = np.array(noisetensor.permute(2,3,1,0)[:,:,:,0])
+        noisetensor = np.divide(noisetensor,np.amax(np.array(noisetensor)))*np.amax(blur)*noise
+        
+        blur = blur.astype(np.float32)+noisetensor
+        
+        return np.where(np.divide(blur,np.amax(blur))>threshold,1,0)
+    
+    def random_noisy_blur(self, label = None, threshold = 0.25, noise = .3, noise_kernels = 10):
+        if label is None: 
+            print("ERROR")
+            return 1
+        if type(label) is not np.ndarray: 
+            print("ERROR")
+            return 1
+        blur = filters.gaussian(label,10,multichannel=True)
+        
+        noise_kernels = noise_kernels+int((random.random()-.5)*6)
+        noise = noise+(random.random()-.5)*.1
+        threshold = threshold+(random.random()-.5)*.1
         
         noisetensor = torch.normal(0,1,size=(1,1,noise_kernels,noise_kernels))        
         noisetensor = torch.nn.functional.interpolate(noisetensor, size = blur.shape[:2], mode = 'bilinear', align_corners = False)
