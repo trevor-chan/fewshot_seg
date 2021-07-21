@@ -11,60 +11,70 @@ import torchvision.transforms as transforms
 
 
 class ImageDataset(Dataset):
-    def __init__(self, transforms_=None, mode="train"):
+    def __init__(self, transforms_=None, mode="train", dirpath = None):
 #         self.transform = transforms.Compose(transforms_)
-
-        self.files = sorted([path[0:-4] for path in glob.glob('/home/matthewachan/datasets/FSS-1000/fewshot_data/**/*.jpg',recursive=True)])
-#         if mode == "train":
-#             self.files.extend(sorted(glob.glob(os.path.join(root, "test") + "/*.*")))
-        
-        
+        self.mode = mode
+        if dirpath == None: dirpath = '/home/matthewachan/datasets/FSS-1000/fewshot_data'
+        self.files = sorted([path[0:-4] for path in glob.glob(dirpath+'/**/*.jpg',recursive=True)])
 
     def __getitem__(self, index):
         img = Image.open(self.files[index % len(self.files)]+".jpg")
         mask = Image.open(self.files[index % len(self.files)]+".png")
-        messymask = Image.fromarray(np.uint8(self.random_noisy_blur(np.array(mask))[:,:,0:3]))
+        
+        if self.mode == "train":
+            messymask = Image.fromarray(np.uint8(self.random_noisy_blur(np.array(mask))[:,:,0:3]))
+                        
+            # Random rotation
+            theta = np.random.normal(loc = 0.0, scale = 20, size = None)
+
+            img = transforms.functional.rotate(img,theta)
+            mask = transforms.functional.rotate(mask,theta)
+            messymask = transforms.functional.rotate(messymask,theta)
+
+            # Resize
+            resize = transforms.Resize(size=(300, 300))
+            img = resize(img)
+            mask = resize(mask)
+            messymask = resize(messymask)
+
+            # Random crop
+            i, j, h, w = transforms.RandomCrop.get_params(
+                img, output_size=(256, 256))
+            img = transforms.functional.crop(img, i, j, h, w)
+            mask = transforms.functional.crop(mask, i, j, h, w)
+            messymask = transforms.functional.crop(messymask, i, j, h, w)
+
+            # Random horizontal flipping
+            if random.random() > 0.5:
+                img = transforms.functional.hflip(img)
+                mask = transforms.functional.hflip(mask)
+                messymask = transforms.functional.hflip(messymask)
                 
-        # Random rotation
-        theta = np.random.normal(loc = 0.0, scale = 20, size = None)
-        
-        img = transforms.functional.rotate(img,theta)
-        mask = transforms.functional.rotate(mask,theta)
-        messymask = transforms.functional.rotate(messymask,theta)
-        
-        # Resize
-        resize = transforms.Resize(size=(300, 300))
-        img = resize(img)
-        mask = resize(mask)
-        messymask = resize(messymask)
-
-        # Random crop
-        i, j, h, w = transforms.RandomCrop.get_params(
-            img, output_size=(256, 256))
-        img = transforms.functional.crop(img, i, j, h, w)
-        mask = transforms.functional.crop(mask, i, j, h, w)
-        messymask = transforms.functional.crop(messymask, i, j, h, w)
-
-        # Random horizontal flipping
-        if random.random() > 0.5:
-            img = transforms.functional.hflip(img)
-            mask = transforms.functional.hflip(mask)
-            messymask = transforms.functional.hflip(messymask)
+            messymask = np.array(messymask)
             
-            
+        if self.mode == "test":
+            # Resize
+            resize = transforms.Resize(size=(256, 256))
+            img = resize(img)
+            mask = resize(mask)
+                
         img = np.array(img)
         mask = np.array(mask)
-        messymask = np.array(messymask)
         
-        img = np.concatenate((img,messymask[:,:,0:1]), axis = 2)
+        if self.mode == "train":
+            img = np.concatenate((img,messymask[:,:,0:1]), axis = 2)
+            gtmask = torch.from_numpy(mask[:,:,0:1])
+            gtmask = gtmask.permute(2,0,1)
+        else:
+            img = np.concatenate((img,mask[:,:,0:1]),axis = 2)
         
-        gtmask = torch.from_numpy(mask[:,:,0:1])
         imgin = torch.from_numpy(img)
-        
-        gtmask = gtmask.permute(2,0,1)
         imgin = imgin.permute(2,0,1)
-
-        return {"gtmask": gtmask, "imgin": imgin, "path": self.files[index]}
+        
+        if self.mode == "train":
+            return {"gtmask": gtmask, "imgin": imgin, "path": self.files[index]}
+        else:
+            return {"imgin": imgin, "path": self.files[index]}
 
     def __len__(self):
         return len(self.files)

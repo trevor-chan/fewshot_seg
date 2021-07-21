@@ -9,9 +9,9 @@ from pathlib import Path
 button_pressed = None
 state = 'pos'
 
-radius = 10
+radius = 100
 
-output_size=(224,224)
+output_size=(256,256)
 
 
 def draw_circle(event,x,y,flags,masks):
@@ -33,8 +33,6 @@ def draw_circle(event,x,y,flags,masks):
     if event == cv2.EVENT_MOUSEMOVE and button_pressed == 'Right':
         cv2.circle(mask,(x,y),radius,(0,0,0),-1)
         cv2.circle(pos_neg,(x,y),radius,(0,0,0),-1)
-
-
 
 
 def one_image (input_path):
@@ -70,9 +68,9 @@ def one_image (input_path):
 
 
     output_path = Path('./labeler_output/')
-
+    
     PIL.Image.open(input_path).resize(output_size).convert('RGB').save(output_path / input_path.with_suffix('').with_suffix('.jpg').name)
-    PIL.Image.fromarray(pos_neg[:, :, 2]).resize(output_size).convert('RGBA').save (output_path / (input_path.with_suffix('').name + '_posneg.png'))
+#     PIL.Image.fromarray(pos_neg[:, :, 2]).resize(output_size).convert('RGBA').save (output_path / (input_path.with_suffix('').with_suffix('.png').name))
     PIL.Image.fromarray(mask[:, :, 2]).resize(output_size).convert('RGBA').save (output_path / input_path.with_suffix('').with_suffix('.png').name)
 
 
